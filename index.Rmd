@@ -1,0 +1,214 @@
+---
+title: "KEAP1_EpCAM"
+author: "Yi Xie"
+date: "27/07/2018"
+output: html_document
+---
+
+```{r include=FALSE}
+setwd("/Users/xie.y/KEAP1")
+files <- c("GSM2224939_CD24-H-4.txt","GSM2224940_CD24-H-5.txt","GSM2224941_CD24-H-6.txt",
+           "GSM2224942_CD24-L-4.txt","GSM2224943_CD24-L-5.txt","GSM2224944_CD24-L-6.txt",
+           "GSM2224948_EpCAM-P-4.txt","GSM2224949_EpCAM-P-5.txt","GSM2224950_EpCAM-P-6.txt")
+read.delim(files[1],nrows = 5)
+
+library(limma)
+library(Glimma)
+library(edgeR)
+library(Mus.musculus)
+library(gplots)
+```
+
+```{r warning=FALSE}
+x <- readDGE(files,columns = c(1,3))
+samplenames <- substring(colnames(x),12, nchar(colnames(x)))
+colnames(x) <- samplenames
+
+group <- as.factor(c("CD24H","CD24H","CD24H","CD24L","CD24L","CD24L",
+                     "EpCAM","EpCAM","EpCAM"))
+x$samples$group <- group
+x$samples
+
+geneid <- rownames(x)
+genes <- select(Mus.musculus, keys = geneid, columns = c("SYMBOL", "TXCHROM","TXSTART","TXEND","GENENAME"), keytype = "ENTREZID")
+genes <- genes[!duplicated(genes$ENTREZID),]
+x$genes <- genes
+cpm <- cpm(x)
+lcpm <- cpm(x,log=TRUE)
+table(rowSums(x$counts==0)==9)
+
+keep.exprs <- rowSums(cpm>1)>=3
+x <- x[keep.exprs,, keep.lib.sizes=FALSE]
+dim(x)
+
+x <- calcNormFactors(x, method = "TMM")
+
+library(RColorBrewer)
+par(mfrow=c(1,1))
+col.group <- group
+levels(col.group) <- brewer.pal(nlevels(col.group),"Set1") #change groupID to colorID
+col.group <- as.character(col.group)
+plotMDS(lcpm, labels=group, main="MDS: Sample Groups", col=col.group)
+
+design <- model.matrix(~0+group)
+colnames(design) <- gsub("group", "", colnames(design))
+design
+```
+
+```{r}
+contr.matrix <- makeContrasts(
+  CD24HvsEpCAM = CD24H-EpCAM,
+  CD24LvsEpCAM = CD24L-EpCAM,
+  AirwayvsEpCAM = (CD24H+CD24L)/2-EpCAM,
+  CD24HvsCD24L = CD24H-CD24L,
+  levels = colnames(design)
+)
+contr.matrix
+```
+
+```{r}
+v <- voom(x,design,plot = TRUE)
+vfit <- lmFit(v,design)
+vfit <- contrasts.fit(vfit, contrasts = contr.matrix)
+efit <- eBayes(vfit)
+summary(decideTests(efit))
+
+tfit <- treat(vfit, lfc=1)
+dt <- decideTests(tfit)
+summary(dt)
+```
+
+```{r}
+##common genes
+#colnames(dt)
+de.common <- which(dt[,1]!=0 & dt[,2]!=0& dt[,3]!=0)
+#length(de.common)
+#head(tfit$genes$SYMBOL[de.common], n=20)
+vennDiagram(dt[,1:3],circle.col = brewer.pal(3,"Set1"))
+
+write.fit(tfit, dt, file="results.txt")
+```
+[Link to results for four comparisons](./results.txt)
+
+
+
+```{r}
+CD24HvsEpCAM <- topTreat(tfit, coef=1,n=Inf)
+CD24LvsEpCAM <- topTreat(tfit, coef=2,n=Inf)
+AirwayvsEpCAM<- topTreat(tfit, coef=3,n=Inf)
+CD24HvsCD24L <- topTreat(tfit, coef=4,n=Inf)
+```
+
+```{r eval=FALSE}
+write.table(topTreat(tfit, coef=1,n=Inf), file = "CD24H_vs_EpCAM_RankedResults.txt",sep = "\t",row.names = F)
+write.table(topTreat(tfit, coef=2,n=Inf), file = "CD24L_vs_EpCAM_RankedResults.txt",sep = "\t",row.names = F)
+write.table(topTreat(tfit, coef=3,n=Inf), file = "Airway_vs_EpCAM_RankedResults.txt",sep = "\t",row.names = F)
+write.table(topTreat(tfit, coef=4,n=Inf), file = "CD24H_vs_CD24L_RankedResults.txt",sep = "\t",row.names = F)
+```
+[Click here to download DEgenes lists ranked by adj.p.val](./DEgenes_RankedResult.zip)
+
+
+```{r eval=FALSE}
+glMDPlot(tfit, coef=1, status = dt[,1], main = colnames(tfit)[1], counts = x$counts,
+         samples=colnames(x), anno = x$genes, groups = group, side.main ="ENTREZID", 
+         display.columns = c("SYMBOL","ENTREZID"), search.by="SYMBOL", launch = F,
+         html = "MDplot_CD24H_vs_EpCAM")
+
+glMDPlot(tfit, coef=2, status = dt[,2], main = colnames(tfit)[2], counts = x$counts,
+         samples=colnames(x), anno = x$genes, groups = group, side.main ="ENTREZID", 
+         display.columns = c("SYMBOL","ENTREZID"), search.by="SYMBOL", launch = F,
+         html = "MDplot_CD24L_vs_EpCAM")
+
+glMDPlot(tfit, coef=3, status = dt[,3], main = colnames(tfit)[3], counts = x$counts,
+         samples=colnames(x), anno = x$genes, groups = group, side.main ="ENTREZID", 
+         display.columns = c("SYMBOL","ENTREZID"), search.by="SYMBOL", launch = F,
+         html = "MDplot_Airway_vs_EpCAM")
+
+glMDPlot(tfit, coef=4, status = dt[,4], main = colnames(tfit)[4], counts = x$counts,
+         samples=colnames(x), anno = x$genes, groups = group, side.main ="ENTREZID", 
+         display.columns = c("SYMBOL","ENTREZID"), search.by="SYMBOL", launch = F,
+         html = "MDplot_CD24H_vs_CD24L")
+```
+[Link to Interactive MDPlot for CD24H_vs_EpCAM](./glimma-plots/MDplot_CD24H_vs_EpCAM.html)
+
+[Link to Interactive MDPlot for CD24L_vs_EpCAM](./glimma-plots/MDplot_CD24L_vs_EpCAM.html)
+
+[Link to Interactive MDPlot for Airway_vs_EpCAM](./glimma-plots/MDplot_Airway_vs_EpCAM.html)
+
+[Link to Interactive MDPlot for CD24H_vs_CD24L](./glimma-plots/MDplot_CD24H_vs_CD24L.html)
+
+
+
+
+```{r fig.height=10, fig.width=8}
+CD24HvsEpCAM.topgenes <- CD24HvsEpCAM$ENTREZID[1:100]
+i <- which(v$genes$ENTREZID %in% CD24HvsEpCAM.topgenes)
+mycol <- colorpanel(1000, "blue","white","red")
+heatmap.2(v$E[i,],scale = "row", labRow = v$genes$SYMBOL[i], labCol = group,
+          col=mycol, trace = "none", density.info = "none", margins = c(8,6),
+          lhei = c(2,10), dendrogram = "column",main = "CD24H VS EpCAM")
+
+CD24LvsEpCAM.topgenes <- CD24LvsEpCAM$ENTREZID[1:100]
+i <- which(v$genes$ENTREZID %in% CD24LvsEpCAM.topgenes)
+mycol <- colorpanel(1000, "blue","white","red")
+heatmap.2(v$E[i,],scale = "row", labRow = v$genes$SYMBOL[i], labCol = group,
+          col=mycol, trace = "none", density.info = "none", margins = c(8,6),
+          lhei = c(2,10), dendrogram = "column",main = "CD24L VS EpCAM")
+
+CD24HvsCD24L.topgenes <- CD24HvsCD24L$ENTREZID[1:100]
+i <- which(v$genes$ENTREZID %in% CD24HvsCD24L.topgenes)
+mycol <- colorpanel(1000, "blue","white","red")
+heatmap.2(v$E[i,],scale = "row", labRow = v$genes$SYMBOL[i], labCol = group,
+          col=mycol, trace = "none", density.info = "none",margins = c(8,6),
+          lhei = c(2,10), dendrogram = "column",main = "CD24H VS CD24L")
+
+AirwayvsEpCAM.topgenes <- AirwayvsEpCAM$ENTREZID[1:100]
+i <- which(v$genes$ENTREZID %in% AirwayvsEpCAM.topgenes)
+mycol <- colorpanel(1000, "blue","white","red")
+heatmap.2(v$E[i,],scale = "row", labRow = v$genes$SYMBOL[i], labCol = group,
+          col=mycol, trace = "none", density.info = "none",margins = c(8,6),
+          lhei = c(2,10), dendrogram = "column",main = "Airway VS EpCAM")
+```
+
+```{r eval=FALSE, warning=FALSE}
+#Gene set testing
+library(EGSEAdata)
+#egsea.data("mouse") #show details
+info = egsea.data("mouse", returnInfo = TRUE)
+names(info) #show database
+info$msigdb$info$collections #show gene set
+
+library(EGSEA)
+gs.annots <- buildIdx(entrezIDs = v$genes$ENTREZID, species = "mouse", 
+                      msigdb.gsets = c("h","c2","c5","c7"), go.part = TRUE)
+##set parameters
+colnames(v$genes)
+symbolsMap <- v$genes[,c(1,3)]
+colnames(symbolsMap) <- c("FeatureID", "Symbols")
+symbolsMap[,"Symbols"] <- as.character(symbolsMap[,"Symbols"])
+egsea.base() #show GSE methods
+baseMethods <- egsea.base()[-2]
+
+##ensemble testing
+gsa <- egsea(voom.results = v, contrasts = contr.matrix, gs.annots = gs.annots,
+             symbolsMap = symbolsMap, baseGSEAs = baseMethods, sort.by = "med.rank",
+             num.threads = 8, report = FALSE)
+```
+
+```{r eval=FALSE}
+load("gsa.rda")
+summary(gsa) #top 10 sets for each collection
+
+#topSets
+contr <- colnames(dt)
+show(gsa)
+gset <- c("h","c2","c5BP","c5CC","c5MF","c7","kegg")
+for (i in 1:length(contr)) {
+  for (j in i:length(gset)) {
+    top <- topSets(gsa, contrast = contr[i], gs.label = gset[j], names.only = FALSE, number = Inf, verbose = FALSE)
+    write.table(top,paste(contr[i],gset[j],"topSets.txt",sep = "_"), sep = "\t", col.names = NA) 
+  }
+}
+```
+[Click here to download ranked GeneSets lists](./Ranked_GeneSets.zip)
+

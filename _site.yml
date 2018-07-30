@@ -1,0 +1,9 @@
+name: "KEAP1"
+output_dir: "."
+navbar:
+  title: "KEAP1"
+  left:
+    - text: "KEAP1_EpCAM"
+      href: index.html
+    - text: "KEAP1_Basal"
+      href: KEAP1_Basal.html
